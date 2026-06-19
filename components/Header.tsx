@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import React from 'react'
 import Image from 'next/image'
-import { Zap } from 'lucide-react';
+import { ArrowRight, Ghost, Zap } from 'lucide-react';
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
+import { Button } from './ui/button';
 
 const Header = () => {
   return (
@@ -13,7 +15,10 @@ const Header = () => {
         </Link>
 
         <div className='flex items-center gap-5'>
-            <Link href={"/projects"} 
+
+            <Show when="signed-in">
+              
+              <Link href={"/projects"} 
             className='text-[13] font-medium transition-colors hover:text-white/80'
             > 
             Projects</Link>
@@ -22,6 +27,27 @@ const Header = () => {
                 <Zap className='h-3 w-3 fill-white/70'/>
                 3 / 40 credits
             </span>
+            <UserButton />
+            </Show>
+
+            
+
+            <Show when="signed-out">
+              <SignInButton mode='modal'>
+                <Button variant="ghost" size="sm" className='hover:text-white/80'>
+                    Sign In
+                </Button>
+              </SignInButton>
+              <SignUpButton mode='modal'>
+                <Button  size="sm" className={"-8 rounded-full font-semibold active:scale-95 px-4 pt-1"}>
+                    Get Started
+                    <ArrowRight className='h-3 w-3 opacity-60'/>
+                </Button>
+              </SignUpButton>
+            </Show>
+            
+
+            
           
         </div>
     </nav>

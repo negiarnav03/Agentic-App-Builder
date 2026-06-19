@@ -4,6 +4,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme-provider";
 import Header from "@/components/Header";
+import { ClerkProvider } from "@clerk/nextjs";
 
 const lora = Lora({
   subsets: ['latin'],
@@ -37,6 +38,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className={`${lora.variable} ${dmSans.variable} font-sans`}>
+        <ClerkProvider>
         <ThemeProvider
             attribute="class"
             defaultTheme="dark"
@@ -48,6 +50,7 @@ export default function RootLayout({
               {children}
             </main>
           </ThemeProvider>
+        </ClerkProvider>
       </body>
     </html>
   );
