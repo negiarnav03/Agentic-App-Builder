@@ -56,3 +56,7 @@ npm install @codesandbox/sandpack-react @codesandbox/sandpack-themes  // it let 
 # install react markdown
 
 npm install react-markdown
+
+
+# for Google Gen AI
+npm install @google/genai
