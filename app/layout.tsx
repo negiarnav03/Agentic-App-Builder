@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import {Lora, DM_Sans} from "next/font/google";
+import { Lora, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -8,21 +8,21 @@ import { ClerkProvider } from "@clerk/nextjs";
 
 const lora = Lora({
   subsets: ['latin'],
-  weight:["400", "500"],
-  style:["normal","italic"],
+  weight: ["400", "500"],
+  style: ["normal", "italic"],
   variable: "--font-serif",
 })
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
-  weight:["400","500","600"],
+  weight: ["400", "500", "600"],
   variable: "--font-sans",
 })
 
 export const metadata: Metadata = {
   title: "Agentic App Builder",
   description: "Create beautiful, modern, responsive, AI-powered websites with ease. Design visually, and let the AI handle the code.",
-  icons:{
+  icons: {
     icon: "/logo-short.jpeg"
   }
 };
@@ -39,13 +39,13 @@ export default function RootLayout({
     >
       <body className={`${lora.variable} ${dmSans.variable} font-sans`}>
         <ClerkProvider>
-        <ThemeProvider
+          <ThemeProvider
             attribute="class"
             defaultTheme="dark"
             enableSystem
             disableTransitionOnChange
           >
-            <Header/>
+            <Header />
             <main>
               {children}
             </main>

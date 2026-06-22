@@ -13,7 +13,7 @@ import { PLANS } from '@/lib/constants';
 const Header = async () => {
   const user = await checkUser();
   return (
-    <header className=' w-full fixed top-0 left-0 z-50 height-16  border-b border-white/6 bg-white/7 backdrop-blur-md '>
+    <header className=' w-full fixed top-0 left-0 z-50 h-16  border-b border-white/6 bg-white/7 backdrop-blur-md '>
       <nav className='mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6'>
         <Link href="/">
           <Image src="/logo.png" alt="logo" width={24} height={24}
