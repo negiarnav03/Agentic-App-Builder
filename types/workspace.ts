@@ -25,8 +25,8 @@ export interface StatusStep {
 export interface WorkspaceData{
     id: string;
     title:string | null;
-    plan:string;
-    
+    messages?: unknown;
+    fileData?: unknown;
 }
 
 export interface WorkspaceUser{

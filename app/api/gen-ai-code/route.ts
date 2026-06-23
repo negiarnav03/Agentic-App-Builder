@@ -41,7 +41,7 @@ RULES:
 10. If the user attaches an image, use it as a design reference and match the layout/style as closely as possible.`;
 
 function extractThoughtLabel(text: string): string | null {
-    // try to grab **bold heading** at the start.
+  // try to grab **bold heading** at the start.
   const boldMatch = text.match(/\*\*([^*]{4,60})\*\*/);
   if (boldMatch) return boldMatch[1].trim();
 
@@ -51,12 +51,9 @@ function extractThoughtLabel(text: string): string | null {
   return null;
 }
 
-
-function sseEvent(type:string, payload:unknown):string{
-    return `data: ${JSON.stringify({type,...(payload as object) })}\n\n`;
+function sseEvent(type: string, payload: unknown): string {
+  return `data: ${JSON.stringify({ type, ...(payload as object) })}\n\n`;
 }
-
-
 
 function buildContents(messages: Message[], fileData: FileData | null) {
   const trimmed = trimHistory(messages);
@@ -87,23 +84,22 @@ function buildContents(messages: Message[], fileData: FileData | null) {
 }
 
 async function validateDependencies(
-    deps:Record<string,string>,
-):Promise<Record<string,string>>{
-    const valid:Record<string,string>={};
-    await Promise.all(
-        Object.entries(deps).map(async([pkg,version])=>{
-            try {
-                const res = await fetch(`https://registry.npmjs.org/${pkg}/latest`,{
-                    signal:AbortSignal.timeout(1500),
-                });
-                if (res.ok)    valid[pkg]=version;
-                
-            } catch {
-                // silently skip hallucinated packages
-            }
-        }),
-    );
-    return valid;
+  deps: Record<string, string>,
+): Promise<Record<string, string>> {
+  const valid: Record<string, string> = {};
+  await Promise.all(
+    Object.entries(deps).map(async ([pkg, version]) => {
+      try {
+        const res = await fetch(`https://registry.npmjs.org/${pkg}/latest`, {
+          signal: AbortSignal.timeout(1500),
+        });
+        if (res.ok) valid[pkg] = version;
+      } catch {
+        // silently skip hallucinated packages
+      }
+    }),
+  );
+  return valid;
 }
 
 export async function POST(request: NextRequest) {
@@ -127,7 +123,7 @@ export async function POST(request: NextRequest) {
   // --arcject: rate limit, prompt injection, sensitive info---
 
   const user = await db.user.findUnique({
-    where: { id: userId, clerkId },
+    where: { clerkId },
     select: { id: true, credits: true },
   });
 
@@ -141,23 +137,67 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const enqueue = (chunk: string) =>
-        controller.enqueue(encoder.encode(chunk));
+      const enqueue = (chunk: string) => {
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch {
+          // Ignore closed connection errors
+        }
+      };
 
       try {
         const contents = buildContents(messages, fileData);
-        const geminiStream = await ai.models.generateContentStream({
-          model: "gemini-3.5-flash",
-          contents,
-          config: {
-            systemInstruction: SYSTEM_PROMPT,
-            temperature: 0.7,
-            responseMimeType: "application/json",
-            thinkingConfig: {
-              includeThoughts: true,
-            },
+
+        let geminiStream: any;
+        let retries = 3;
+        let delay = 1000;
+        let model = "gemini-3.5-flash";
+        const config: any = {
+          systemInstruction: SYSTEM_PROMPT,
+          temperature: 0.7,
+          responseMimeType: "application/json",
+          thinkingConfig: {
+            includeThoughts: true,
           },
-        });
+        };
+
+        while (retries > 0) {
+          try {
+            geminiStream = await ai.models.generateContentStream({
+              model: model,
+              contents,
+              config: config,
+            });
+            break; // successfully started stream
+          } catch (error: any) {
+            const status = error?.status || error?.statusCode;
+            const isRetryable = status === 503 || status === 429 || 
+              (error?.message && (
+                error.message.includes("503") || 
+                error.message.includes("429") || 
+                error.message.includes("UNAVAILABLE") || 
+                error.message.includes("RESOURCE_EXHAUSTED")
+              ));
+
+            if (isRetryable && retries > 1) {
+              if (retries === 3 && model === "gemini-3.5-flash") {
+                model = "gemini-2.5-flash";
+                enqueue(sseEvent("status", { message: `AI model busy. Switching to backup model 1...` }));
+              } else if (retries === 2 && model === "gemini-2.5-flash") {
+                model = "gemini-1.5-flash";
+                delete config.thinkingConfig; // 1.5-flash does not support thinkingConfig
+                enqueue(sseEvent("status", { message: `AI model busy. Switching to stable backup model...` }));
+              } else {
+                enqueue(sseEvent("status", { message: `AI model busy. Retrying in ${(delay / 1000).toFixed(0)}s...` }));
+              }
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              retries--;
+              delay *= 2; // exponential backoff
+            } else {
+              throw error; // throw original error if not retryable or retries exhausted
+            }
+          }
+        }
 
         // collects the actual Json output chunks
         let accumulated = "";
@@ -203,7 +243,7 @@ export async function POST(request: NextRequest) {
           enqueue(
             sseEvent("error", {
               message: "AI returned invalid JSON. Please try again.",
-            })
+            }),
           );
           controller.close();
           return;
@@ -220,7 +260,7 @@ export async function POST(request: NextRequest) {
           enqueue(
             sseEvent("error", {
               message: "AI response missing files. Please try again.",
-            })
+            }),
           );
           controller.close();
           return;
@@ -228,7 +268,7 @@ export async function POST(request: NextRequest) {
 
         // to validate the npm package of the need.
         enqueue(sseEvent("status", { message: "Validating packages..." }));
-        
+
         const validateDeps = await validateDependencies(dependencies ?? {});
         const newFileData: FileData = {
           files,
@@ -238,69 +278,87 @@ export async function POST(request: NextRequest) {
 
         enqueue(sseEvent("status", { message: "saving.." }));
 
-        const lastUserMsg = messages[messages.length-1];
-        const updatedMessages: Message[]=[
+        const lastUserMsg = messages[messages.length - 1];
+        const updatedMessages: Message[] = [
           ...messages,
           { role: "assistant", content: assistantMessage },
         ];
 
-        const [workspace] = await db.$transaction([
-          workspaceId
-          ? db.workspace.update({
-            where:{id:workspaceId, userId},
-            data:{messages:updatedMessages as never,
-              fileData:newFileData as never,
-            },
-          })
-          : db.workspace.create({
-            data:{
-              userId,
-              title:aiTitle ?? lastUserMsg.content.slice(0,80),
-              messages:updatedMessages as never,
-              fileData:newFileData as never,
-            },
-          }),
+        const workspace = await db.$transaction(
+          async (tx) => {
+            const ws = workspaceId
+              ? await tx.workspace.update({
+                  where: { id: workspaceId, userId },
+                  data: {
+                    messages: updatedMessages as never,
+                    fileData: newFileData as never,
+                  },
+                })
+              : await tx.workspace.create({
+                  data: {
+                    userId,
+                    title: aiTitle ?? lastUserMsg.content.slice(0, 80),
+                    messages: updatedMessages as never,
+                    fileData: newFileData as never,
+                  },
+                });
 
-          db.user.update({
-          where:{id:userId},
-          data:{credits:{decrement: CREDIT_COST_PER_GENERATION}},
-        }),
+            await tx.user.update({
+              where: { id: userId },
+              data: { credits: { decrement: CREDIT_COST_PER_GENERATION } },
+            });
 
-        ]);
+            return ws;
+          },
+          { timeout: 200000 },
+        );
 
         const updatedUser = await db.user.findUnique({
-          where:{id:userId},
-          select:{credits:true},
+          where: { id: userId },
+          select: { credits: true },
         });
 
         enqueue(
-          sseEvent("done",{
+          sseEvent("done", {
             workspaceId: workspace.id,
             assistantMessage,
-            fileData:newFileData,
+            fileData: newFileData,
             creditsRemaning:
-            updatedUser?.credits ?? user.credits - CREDIT_COST_PER_GENERATION,
+              updatedUser?.credits ?? user.credits - CREDIT_COST_PER_GENERATION,
           }),
         );
+      } catch (err: any) {
+        console.error("[gen-ai-code] stream error:", err);
+        const status = err?.status || err?.statusCode;
+        const msg = err?.message || "";
+        let userMessage = "Something went wrong. Please try again.";
 
-      } catch (error) {
-        console.error("[gen-ai-code] stream error:", error);
+        if (status === 503 || msg.includes("503") || msg.includes("UNAVAILABLE")) {
+          userMessage = "The AI model is currently experiencing high demand. Please try again in a few moments.";
+        } else if (status === 429 || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+          userMessage = "Rate limit exceeded. Please wait a moment before trying again.";
+        }
+
         enqueue(
-          sseEvent("error",{
-            message:"Something went wrong. Please try again.",
-          })
+          sseEvent("error", {
+            message: userMessage,
+          }),
         );
-      }finally{
-        controller.close();
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          // Ignore if controller is already closed
+        }
       }
     },
   });
 
-  return new Response(stream,{
-    headers:{
-      "content-type":"text/event-stream",
-      "cache-control":"no-cache",
-      Connection:"keep-alive",
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      Connection: "keep-alive",
     },
   });
 }
