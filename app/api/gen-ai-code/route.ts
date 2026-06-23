@@ -5,8 +5,11 @@ import { auth } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { Prisma } from "@prisma/client";
+import { detectPromptInjection } from "@arcjet/next";
+import { aj } from "@/lib/arcjet";
+import arcjet from "arcjet";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY! });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "" });
 
 function trimHistory(messages: Message[]): Message[] {
   if (messages.length <= 10) return messages;
@@ -59,7 +62,7 @@ function buildContents(messages: Message[], fileData: FileData | null) {
   const trimmed = trimHistory(messages);
 
   return trimmed.map((msg, idx) => {
-    const role = msg.role === "assistant" ? "modal" : "user";
+    const role = msg.role === "assistant" ? "model" : "user";
 
     if (msg.role === "user") {
       const parts: object[] = [];
@@ -83,6 +86,7 @@ function buildContents(messages: Message[], fileData: FileData | null) {
   });
 }
 
+// ─── Route ────────────────────────────────────────────────────────────────────
 async function validateDependencies(
   deps: Record<string, string>,
 ): Promise<Record<string, string>> {
@@ -120,7 +124,28 @@ export async function POST(request: NextRequest) {
     return Response.json({ message: "no messages" }, { status: 400 });
   }
 
-  // --arcject: rate limit, prompt injection, sensitive info---
+  // --arcjet: rate limit, prompt injection, sensitive info---
+
+  const arcjetReq = new Request(request.url,{
+    method:request.method,
+    headers:request.headers,
+    body:JSON.stringify(body),
+  });
+
+  const lastUserMessage = [...messages].reverse().find((m) =>m.role ==="user")?.content??""; 
+  const decision = await aj.protect(arcjetReq,{
+    requested: 1,
+    userId: clerkId,
+    detectPromptInjectionMessage: lastUserMessage,
+  
+  });
+
+  if(decision.isDenied()){
+    return Response.json(
+      {message:decision.reason?.type??"Request blocked"},
+      {status:429},
+    )
+  }
 
   const user = await db.user.findUnique({
     where: { clerkId },
@@ -149,60 +174,63 @@ export async function POST(request: NextRequest) {
         const contents = buildContents(messages, fileData);
 
         let geminiStream: any;
-        let retries = 3;
-        let delay = 1000;
-        let model = "gemini-3.5-flash";
         const config: any = {
           systemInstruction: SYSTEM_PROMPT,
-          temperature: 0.7,
+          temperature: 1,
           responseMimeType: "application/json",
           thinkingConfig: {
             includeThoughts: true,
           },
         };
 
-        while (retries > 0) {
+        const modelsToTry = [
+          "gemini-3.5-flash",
+          "gemini-3.1-pro",
+          "gemini-2.5-flash",
+          "gemini-2.0-flash",
+          "gemini-1.5-flash",
+          "gemini-2.5-pro",
+        ];
+
+        let modelIndex = 0;
+        let delay = 1000;
+        let lastError: any = null;
+
+        while (modelIndex < modelsToTry.length) {
+          const model = modelsToTry[modelIndex];
           try {
+            console.log(`Starting stream with model: ${model}`);
             geminiStream = await ai.models.generateContentStream({
               model: model,
               contents,
               config: config,
             });
+            lastError = null;
             break; // successfully started stream
           } catch (error: any) {
-            const status = error?.status || error?.statusCode;
-            const isRetryable = status === 503 || status === 429 || 
-              (error?.message && (
-                error.message.includes("503") || 
-                error.message.includes("429") || 
-                error.message.includes("UNAVAILABLE") || 
-                error.message.includes("RESOURCE_EXHAUSTED")
-              ));
-
-            if (isRetryable && retries > 1) {
-              if (retries === 3 && model === "gemini-3.5-flash") {
-                model = "gemini-2.5-flash";
-                enqueue(sseEvent("status", { message: `AI model busy. Switching to backup model 1...` }));
-              } else if (retries === 2 && model === "gemini-2.5-flash") {
-                model = "gemini-1.5-flash";
-                delete config.thinkingConfig; // 1.5-flash does not support thinkingConfig
-                enqueue(sseEvent("status", { message: `AI model busy. Switching to stable backup model...` }));
-              } else {
-                enqueue(sseEvent("status", { message: `AI model busy. Retrying in ${(delay / 1000).toFixed(0)}s...` }));
-              }
+            console.error(`Attempt with ${model} failed:`, error);
+            lastError = error;
+            if (modelIndex < modelsToTry.length - 1) {
+              modelIndex++;
+              const nextModel = modelsToTry[modelIndex];
+              enqueue(
+                sseEvent("status", {
+                  message: `Model ${model} unavailable. Trying ${nextModel}...`,
+                }),
+              );
               await new Promise((resolve) => setTimeout(resolve, delay));
-              retries--;
-              delay *= 2; // exponential backoff
+              delay *= 1.5;
             } else {
-              throw error; // throw original error if not retryable or retries exhausted
+              break;
             }
           }
         }
 
-        // collects the actual Json output chunks
-        let accumulated = "";
+        if (lastError) {
+          throw lastError; // Throw the error so it propagates to the catch block and displays to the user
+        }
 
-        // used to throttle thought -> status emissions
+        let accumulated = "";
         let lastEmitTime = 0;
 
         for await (const chunk of geminiStream) {
@@ -210,8 +238,6 @@ export async function POST(request: NextRequest) {
           for (const part of parts) {
             if (!part.text) continue;
             if (part.thought) {
-              // thought chunks are Gemini's internal reasoning - verbose and frequent.
-              // we throttle to one status update per 600ms and extract just the bold heading or first sentence so the UI stays clean.
               const now = Date.now();
               if (now - lastEmitTime > 600) {
                 const label = extractThoughtLabel(part.text);
@@ -221,15 +247,12 @@ export async function POST(request: NextRequest) {
                 }
               }
             } else {
-              // non thought parts are the actual json output - accumulate them
               accumulated += part.text;
             }
           }
         }
 
         // parse json
-        // if gemini return malformed json we abort without deducting a credit.
-        // this is the "no charge on ai failure" guarantee.
         let parsed: {
           assistantMessage: string;
           title?: string;
@@ -266,7 +289,6 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        // to validate the npm package of the need.
         enqueue(sseEvent("status", { message: "Validating packages..." }));
 
         const validateDeps = await validateDependencies(dependencies ?? {});
@@ -333,10 +355,20 @@ export async function POST(request: NextRequest) {
         const msg = err?.message || "";
         let userMessage = "Something went wrong. Please try again.";
 
-        if (status === 503 || msg.includes("503") || msg.includes("UNAVAILABLE")) {
-          userMessage = "The AI model is currently experiencing high demand. Please try again in a few moments.";
-        } else if (status === 429 || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
-          userMessage = "Rate limit exceeded. Please wait a moment before trying again.";
+        if (
+          status === 503 ||
+          msg.includes("503") ||
+          msg.includes("UNAVAILABLE")
+        ) {
+          userMessage =
+            "The AI model is currently experiencing high demand. Please try again in a few moments.";
+        } else if (
+          status === 429 ||
+          msg.includes("429") ||
+          msg.includes("RESOURCE_EXHAUSTED")
+        ) {
+          userMessage =
+            "Rate limit exceeded. Please wait a moment before trying again.";
         }
 
         enqueue(

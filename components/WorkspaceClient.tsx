@@ -54,6 +54,7 @@ const WorkspaceClient = ({
     const [fileData, setFileData] = useState<FileData | null>(
         parsefileData(workspace?.fileData));
     const [statusLog, setStatusLog] = useState<StatusStep[]>([]);
+    const [isImproving, setIsImproving] = useState(false);
 
 
     const messagesRef = useRef<Message[]>(messages);
@@ -70,6 +71,11 @@ const WorkspaceClient = ({
     useEffect(() => {
         workspaceIdRef.current = workspaceId
     }, [workspaceId]);
+
+
+    const generateAbortRef = useRef<AbortController | null>(null);
+    const improveAbortRef = useRef<AbortController | null>(null);
+
 
 
 
@@ -115,10 +121,14 @@ const WorkspaceClient = ({
             setIsGenerating(true);
             setStatusLog([{ label: "Thinking...", status: "running" }]);
 
+            const abortController = new AbortController();
+            generateAbortRef.current = abortController;
+
             try {
                 const res = await fetch("/api/gen-ai-code", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
+                    signal:abortController.signal,
                     body: JSON.stringify({
                         userId,
                         workspaceId: currentWorkspaceId,
@@ -181,12 +191,17 @@ const WorkspaceClient = ({
                 
 
             } catch (err) { 
+                if(err instanceof Error && err.name === "AbortError"){
+                    setMessages((prev)=> prev.slice(0,-1));
+                    return;
+                }
                 toast.error(
                     err instanceof Error ? err.message:"Something went wrong.",
                 );
                 setMessages((prev)=> prev.slice(0,-1));
                 
             } finally {
+                generateAbortRef.current=null;
                 setIsGenerating(false);
                 setStatusLog([]);
             }   
@@ -194,6 +209,11 @@ const WorkspaceClient = ({
         },
         [credits, isGenerating, userId],
 );
+
+const handleStop = useCallback(()=>{
+    generateAbortRef.current?.abort();
+    improveAbortRef.current?.abort();
+},[]);
 
     return (
         <div className='flex h-[calc(100vh-4rem)] overflow-hidden bg-[#0a0a0a]'>
@@ -210,6 +230,7 @@ const WorkspaceClient = ({
                 credits={credits}
                 initialPrompt={initialPrompt}
                 onGenerate={handleGenerate}
+                onStop={handleStop}
                 userId={userId}
                 wordspaceId={workspaceId}
                 appTitle={fileData?.title ?? workspace?.title ?? null}
@@ -222,6 +243,12 @@ const WorkspaceClient = ({
                 isGenerating={isGenerating}
                 statusLog={statusLog}
                 onFilePatch={handleFilePatch}
+                isImproving={isImproving}
+                onFixError={(error)=>
+                    handleGenerate(
+                        `There is an error in the preview:\n\n\`\`\`n${error}\n\`\`\`\n\nPlease fix it.`,
+                    )
+                }
             />
 
 

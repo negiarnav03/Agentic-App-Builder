@@ -9,6 +9,8 @@ npx shadcn@latest add badge dialog dropdown-menu sonner tabs textarea
 
 npx shadcn@latest add @animate-ui/components-backgrounds-hole
 
+npm i react-spinners
+
 
 # First, run the development server:
 
@@ -39,6 +41,10 @@ npm i @prisma/client pg
 npx prisma generate     // genrate the prisma client
 npx prisma migrate dev   // apply the migration
 npx prisma migrate dev --name init  // if the upper one doesn't work.
+
+npm install @supabase/supabase-js
+
+npm i zod
 
 
 # Arcjet for security
