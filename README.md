@@ -46,6 +46,8 @@ npm install @supabase/supabase-js
 
 npm i zod
 
+npm i jszip
+
 
 # Arcjet for security
 npm i @arcjet/next

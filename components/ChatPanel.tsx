@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { BlueTitle } from './resuables';
 import PricingModal from './PricingModal';
 import { cn } from '@/lib/utils';
-import { ArrowUp, Check, Loader2, Paperclip, Sparkle, Sparkles, Square, WheatIcon, X } from 'lucide-react';
+import { ArrowUp, Check, Loader2, Paperclip, Sparkle, Sparkles, Square, Wand2, WheatIcon, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { useUser } from '@clerk/nextjs';
 import ReactMarkdown from 'react-markdown';
@@ -120,34 +120,37 @@ const ChatPanel = ({
       }
    };
 
-   const handleFileChange = async (e:ChangeEvent<HTMLInputElement>)=>{
+   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if(!file || !file.type.startsWith("image/"))return;
+      if (!file || !file.type.startsWith("image/")) return;
       setIsUploading(true);
-      
-      
+
+
       try {
          const ext = file.name.split(".").pop();
-         const path = `${userId}/${wordspaceId??"new"}/${Date.now()}.${ext}`;
-         const {error} = await supabase.storage
-         .from("workspace-image")
-         .upload(path,file,{upsert:true});
-         if(error){
+         const path = `${userId}/${wordspaceId ?? "new"}/${Date.now()}.${ext}`;
+         const { error } = await supabase.storage
+            .from("workspace-image")
+            .upload(path, file, { upsert: true });
+         if (error) {
             throw error;
          }
-         const {data} = supabase.storage
-         .from("workspace-image")
-         .getPublicUrl(path);
+         const { data } = supabase.storage
+            .from("workspace-image")
+            .getPublicUrl(path);
          setPendingImageUrl(data.publicUrl);
-         
+
       } catch (error) {
          const message = error instanceof Error ? error.message : String(error);
          toast.error(message);
       } finally {
          setIsUploading(false);
-         if(fileRef.current) fileRef.current.value = "";
+         if (fileRef.current) fileRef.current.value = "";
       }
    };
+
+   const lastMsg = messages[messages.length - 1];
+   const isStreamingAssistant = isImproving && lastMsg?.role === "assistant";
 
    return (
       <div className='flex w-[320px] shrink-0 flex-col bg-[#0d0d0d]' >
@@ -180,34 +183,38 @@ const ChatPanel = ({
             {messages.length === 0 && !isGenerating && (
                <div className='flex h-full items-center justify-center'>
                   <p className='text-center text-xs text-white/20'>
-                     Describe what you want to build... hover to see the
+                     Describe what you want to build...
                   </p>
                </div>
             )}
 
             <div className='space-y-4'>
-               {messages.map((msg, i) => (
-                  <div key={i}>
-                     {msg.role === "user" ? (
-                        <div className='flex items-start justify-end gap-2'>
-                           <div className='max-w-[85%] space-y-1.5'>
-                              {/* todo show msg img url */}
+               {messages.map((msg, i) => {
 
-                              {msg.imageUrl && (
-                                 <img
-                                    src={msg.imageUrl}
-                                    alt="uploaded"
-                                    className='max-h-40 w-full rounded-lg object-cover'
-                                 />
-                              )}
-                              
+                  const isLast = i === messages.length - 1;
+                  const isLiveStream = isLast && isStreamingAssistant;
+                  return (
+                     <div key={i}>
+                        {msg.role === "user" ? (
+                           <div className='flex items-start justify-end gap-2'>
+                              <div className='max-w-[85%] space-y-1.5'>
+                                 {/* todo show msg img url */}
 
-                              <div className='rounded-2xl rounded-br-sm bg-white/10 px-3.5 py-2.5'>
-                                 <p className='text-[13px] leading-relaxed text-white/80 wrap-break-word'>{msg.content}</p>
+                                 {msg.imageUrl && (
+                                    <img
+                                       src={msg.imageUrl}
+                                       alt="uploaded"
+                                       className='max-h-40 w-full rounded-lg object-cover'
+                                    />
+                                 )}
+
+
+                                 <div className='rounded-2xl rounded-br-sm bg-white/10 px-3.5 py-2.5'>
+                                    <p className='text-[13px] leading-relaxed text-white/80 wrap-break-word'>{msg.content}</p>
+                                 </div>
+
                               </div>
-
-                           </div>
-                           {user?.imageUrl ? (
+                              {user?.imageUrl ? (
                                  <img
                                     src={user.imageUrl}
                                     alt={user.fullName ?? "You"}
@@ -218,30 +225,53 @@ const ChatPanel = ({
                                     {user?.firstName?.[0] ?? "U"}
                                  </div>
                               )}
-                        </div>
-                     ) : (
-                        <div className='flex items-start gap-2'>
-                           <Image
-                              src="/logo-short.jpeg"
-                              alt="forege"
-                              width={24}
-                              height={24}
-                              className="mt-0.5 h-6 w-6 shrink-0 rounded-md"
-                           />
-                           <div className='prose prose-sm prose-invert max-w-none text-[13px] leading-relaxed text-white/70 wrap-break-word [&_code]:rounded [&_code]:bg-white/10 [&-code]:px-1 [&-code]:py-0.5 [&_code]:text-xs [&_code]:text-blue-300/80 [&_li]:my-0.5 [&-p]:my-1 [&_ul]:my-1 '>
-                              <ReactMarkdown>{msg.content}</ReactMarkdown>
                            </div>
-                        </div>
-                     )}
-                  </div>
-               ))}
+                        ) : (
+                           <div className='flex items-start gap-2'>
+                              <Image
+                                 src="https://images.pexels.com/photos/37911538/pexels-photo-37911538.jpeg"
+                                 alt="forege"
+                                 width={24}
+                                 height={24}
+                                 className="mt-0.5 h-6 w-6 shrink-0 rounded-md"
+                              />
+                              <div className='min-w-0 rounded-2xl rounded-tl-sm bg-white/5 px-3.5 py-2.5'>
+                                 {isLiveStream && !msg.content ? (
+                                    <div className='flex items-center gap-2'>
+                                       <Wand2 className="h-3 w-3 shrink-0 animate-pulse text-blue-400/60" />
+                                       <span className='text-[12px] text-white/30 animate-pulse'>
+                                          Cline is thinking.
+                                       </span>
+                                    </div>
+                                 ) : isLiveStream && msg.content ? (
+                                    <div>
+                                       <div className='mb-1.5 flex items-center gap-1.5'>
+                                          <Wand2 className="h-3 w-3 shrink-0 text-blue-400/60" />
+                                          <span className='text-[10px] font-medium uppercase tracking-wider text-blue-400/50 animate-pulse'>Agent reasoning</span>
+                                       </div>
+
+                                       <p className='text-[12px] leading-relaxed text-white/35 wrap-break-word'>{msg.content}
+                                          <span className='ml-0.5 inline-block h-3 w-0.5 animate-[blink_1s_ease-in-out_infinte] bg-blue-400/60 align-middle' />
+                                       </p>
+                                    </div>
+                                 ) : (
+                                    <div className='prose prose-sm prose-invert max-w-none text-[13px] leading-relaxed text-white/70 wrap-break-word [&_code]:rounded [&_code]:bg-white/10 [&-code]:px-1 [&-code]:py-0.5 [&_code]:text-xs [&_code]:text-blue-300/80 [&_li]:my-0.5 [&-p]:my-1 [&_ul]:my-1 '>
+                                       <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                    </div>
+                                 )}
+                              </div>
+                           </div>
+                        )}
+                     </div>
+                  )
+               })}
 
 
                {/* status steps - shown while generating */}
 
                {isGenerating && <div className='flex items-start gap-2'>
                   <Image
-                     src="/logo-short.jpeg"
+                     src="https://images.pexels.com/photos/37911538/pexels-photo-37911538.jpeg"
                      alt="forege"
                      width={24}
                      height={24}
@@ -277,14 +307,14 @@ const ChatPanel = ({
             </div>
          </div>
 
-         {noCredits && 
-         <div className='mx-3 b-2 rounded-xl border border-red-500/15 bg-red-950/40 px-4 py-3'>
-            <p className='mb-2 text-[12px font-medium text-red-400/80'>You have used all of your credits.</p>
-            <PricingModal reason='credits'>
+         {noCredits &&
+            <div className='mx-3 b-2 rounded-xl border border-red-500/15 bg-red-950/40 px-4 py-3'>
+               <p className='mb-2 text-[12px font-medium text-red-400/80'>You have used all of your credits.</p>
+               <PricingModal reason='credits'>
                   <span className='inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full bg-white px-3 text-ts text-black active:sacle-95'>
-                     <Sparkles className='h-3 w-3'/>Upgrade your plan.
+                     <Sparkles className='h-3 w-3' />Upgrade your plan.
                   </span>
-            </PricingModal>
+               </PricingModal>
             </div>}
          <div className='border-t border-white/6 p-3'>
 
@@ -296,16 +326,16 @@ const ChatPanel = ({
                         alt='pending'
                         className='w-16 h-16 rounded-lg object-cover'
                      />
-                     <Button 
-                     onClick={()=> setPendingImageUrl(null)}
-                     className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-white/60 hover:text-white">
-                        <X  className='h-2.5 w-2.5'/>
+                     <Button
+                        onClick={() => setPendingImageUrl(null)}
+                        className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-white/60 hover:text-white">
+                        <X className='h-2.5 w-2.5' />
                      </Button>
                   </div>
                )}
-               </div>
-            
-            
+            </div>
+
+
 
             <div className={cn(
                "rounded-xl border bg-whte/4 transition-colors",
@@ -336,12 +366,12 @@ const ChatPanel = ({
                <div className='flex items-center justify-between px-2 pb-2'>
                   <Button variant="ghost"
                      size="icon"
-                     onClick={()=>fileRef.current?.click()}
-                     disabled = {isGenerating || isImproving || isUploading || noCredits}
+                     onClick={() => fileRef.current?.click()}
+                     disabled={isGenerating || isImproving || isUploading || noCredits}
                      className="h-7 w-7 rounded-lg text-white/25 hover:bg-white/6 hover:text-white/50 disabled:opacity-40">
-                     {isUploading?(
-                        <Loader2 className='h-3.5 w-3.5 animate-spin'/>
-                     ):(
+                     {isUploading ? (
+                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                     ) : (
                         <Paperclip className='h-4 w-4' />
                      )}
                   </Button>

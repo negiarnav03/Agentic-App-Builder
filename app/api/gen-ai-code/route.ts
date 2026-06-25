@@ -261,7 +261,12 @@ export async function POST(request: NextRequest) {
         };
 
         try {
-          parsed = JSON.parse(accumulated);
+          let cleanText = accumulated.trim();
+          if (cleanText.startsWith("```")) {
+            cleanText = cleanText.replace(/^```(?:json)?\n?/, "");
+            cleanText = cleanText.replace(/\n?```$/, "");
+          }
+          parsed = JSON.parse(cleanText.trim());
         } catch (error) {
           enqueue(
             sseEvent("error", {
@@ -345,7 +350,7 @@ export async function POST(request: NextRequest) {
             workspaceId: workspace.id,
             assistantMessage,
             fileData: newFileData,
-            creditsRemaning:
+            creditsRemaining:
               updatedUser?.credits ?? user.credits - CREDIT_COST_PER_GENERATION,
           }),
         );

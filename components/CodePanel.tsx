@@ -28,6 +28,7 @@ import PricingModal from "@/components/PricingModal";
 import type { FileData, StatusStep } from "@/types/workspace";
 import { RingLoader } from "react-spinners";
 import { unsubscribe } from "diagnostics_channel";
+import JSZip from "jszip";
 
 // ─── Placeholder ──────────────────────────────────────────────────────────────
 
@@ -88,8 +89,8 @@ interface CodePanelProps {
     onImprove?: (userRequest: string) => Promise<void>;
     onFixError?: (error: string) => Promise<void>;
     onFilePatch: (patches: FileData) => void;
-    appTitle?: string | null;
     isImproving: boolean;
+    appTitle?: string | null;
     isProUser?: boolean;
 }
 
@@ -101,6 +102,9 @@ function SandpackInner({
     statusLog,
     isImproving,
     onFixError,
+    isProUser,
+    appTitle,
+    onImprove,
 }: {
     fileData: FileData | null;
     isGenerating: boolean;
@@ -109,6 +113,9 @@ function SandpackInner({
     setActiveTab: (tab: ActiveTab) => void;
     isImproving: boolean;
     onFixError?: (error: string) => Promise<void>;
+    appTitle?: string | null;
+    isProUser?: boolean;
+    onImprove?: (userRequest: string) => Promise<void>;
 
 
     // todo : apptitle isprouser
@@ -116,6 +123,129 @@ function SandpackInner({
     const { sandpack, listen } = useSandpack();
     const [previewError, setPreviewError] = useState<string | null>("error in the app",);
     const unsubscribeRef = useRef<(() => void) | null>(null);
+
+    const [improveInput, setImproveInput] = useState("");
+    const [showImproveInput, setShowImproveInput] = useState(false);
+
+    const [isExporting, setIsExporting] = useState(false);
+
+    const handleExportZip = async () => {
+        if (isExporting) return;
+        setIsExporting(true);
+
+        try {
+            const filesToZip =
+                Object.keys(sandpack.files).length > 0
+                    ? sandpack.files
+                    : (fileData?.files ?? {});
+
+            const dependencies = {
+                ...BASE_DEPENDENCIES,
+                ...(fileData?.dependencies ?? {}),
+            };
+            const zip = new JSZip();
+
+            zip.file(
+                "package.json",
+                JSON.stringify({
+                    name: appTitle ?? "AI APP",
+                    version: "1.0.0",
+                    private: true,
+                    dependencies: {
+                        react: "^18.2.0",
+                        "react-dom": "^18.2.0",
+                        "react-script": "^5.0.1",
+                        ...dependencies,
+                    },
+                    scripts: {
+                        start: "react-scripts start",
+                        build: "react-scripts build",
+                    },
+                    browserslist: {
+                        production: [">0.2%", "last 2 versions", "not dead"],
+                        development: [
+                            ">0.2%",
+                            "last 2 chrome versions",
+                            "last 2 firefox versions",
+                            "last 2 safari versions",
+                        ]
+                    },
+                },
+                    null,
+                    2,
+                ),
+            );
+
+            // inject tailwind cdn in the html template
+            zip.file(
+                "public/index.html",
+                `<!DOCTYPE html>
+                <html lang="en">
+                <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <meta name="theme-color" content="#000000" />
+                <title>${appTitle ?? "AI APP"}</title>
+                </head>
+                <body>
+                <div id="root"></div>
+                <script src="https://cdn.tailwindcss.com"></script>
+                </body>
+                </html>
+                `
+            );
+
+            //All generated source files. used src.
+
+            for (const [filePath, fileObj] of Object.entries(filesToZip)) {
+                const code = typeof fileObj === "object" && fileObj != null && "code" in fileObj ?
+                    (fileObj as { code: string }).code
+                    : "";
+
+                const zipPath = filePath.startsWith("/")
+                    ? `src${filePath}`
+                    : `src/${filePath}`;
+
+                zip.file(zipPath, code);
+            }
+
+            zip.file(
+                "src/index.js",
+                `import React from "react";
+                import ReactDOM from "react-dom/client";
+                import "./styles.css";
+                import App from "./App";
+
+                const root = ReactDOM.createRoot(document.getElementById("root"));
+                root.render(
+                <React.StrictMode>
+                    <App />
+                </React.StrictMode>
+                );
+                `
+            )
+
+            const blob = await zip.generateAsync({ type: "blob" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = appTitle ? `${appTitle?.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-\.]/g, " ")}.zip` : "ai-app.zip";
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error("Failed to export ZIP file", err);
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleImproveSubmit = async () => {
+        const trimmed = improveInput.trim();
+        if (!trimmed || isImproving) return;
+        setImproveInput("");
+        setShowImproveInput(false);
+        await onImprove?.(trimmed);
+    }
 
     useEffect(() => {
         unsubscribeRef.current = listen((msg) => {
@@ -154,6 +284,7 @@ function SandpackInner({
     useEffect(() => {
         if (isGenerating) setPreviewError(null);
     }, [isGenerating])
+
 
 
     // Push file updates into Sandpack without remounting the provider
@@ -200,7 +331,72 @@ function SandpackInner({
                         <Eye className="h-3.5 w-3.5" />preview
                     </TabsTrigger>
                 </TabsList>
-                {/* TODO: improve with AI + download zip buttons */}
+
+                {isProUser ? (
+                    showImproveInput ? (
+                        <div className="flex items-center gap-1.5">
+                            <input
+                                autoFocus
+                                value={improveInput}
+                                onChange={(e) => setImproveInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleImproveSubmit();
+                                    if (e.key === "Escape") setShowImproveInput(false);
+                                }}
+                                placeholder="What should I improve?"
+                                className="h-7 w-52 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-white/80 placeholder:text-white/25 focus:border-white/20 focus:outline-none"
+                            />
+                            <Button
+                                size="icon"
+                                onClick={handleImproveSubmit}
+                                disabled={!improveInput.trim() || isImproving}
+                                className="h-7 w-7 rounded-lg bg-white text-black hover:bg-white/90">
+                                {isImproving ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                    <ArrowUp className="h-3 w-3" />
+                                )}
+                            </Button>
+                        </div>
+                    ) : (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowImproveInput(true)}
+                            disabled={isImproving || !fileData}
+                            className="h-7 gap-1.5 text-xs text-white/40 hover:text-white/70"
+                        >
+                            <Wand2 className="h-3.5 w-3.5" />
+                            {isImproving ? "improving..." : "Improve with Agent"}
+                        </Button>
+                    )
+                ) : (
+                    <PricingModal reason="upgrade">
+                        <span className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-white/40 hover:text-white/70">
+                            <Wand2 className="h-3.5 w-3.5" />
+                            Improve with Agent.
+                        </span>
+                    </PricingModal>
+                )}
+
+                {/*download zip buttons */}
+
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleExportZip}
+                    disabled={isExporting || !fileData}
+                    className="h=7 gap-1.5 text-ts text-white/40 hover:text-white/70"
+
+                >
+                    {isExporting ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                        <Download className="h-3.5 w-3.5" />
+                    )}
+                    Export
+                </Button>
+
             </div>
 
             {/* ── Sandpack content ──────────────────────────────────────── */}
@@ -311,6 +507,9 @@ export function CodePanel({
     onFilePatch: _onFilePatch,
     isImproving,
     onFixError,
+    isProUser,
+    appTitle,
+    onImprove,
 
 }: CodePanelProps) {
     const [activeTab, setActiveTab] = useState<ActiveTab>("preview");
@@ -347,6 +546,9 @@ export function CodePanel({
                     setActiveTab={setActiveTab}
                     isImproving={isImproving}
                     onFixError={onFixError}
+                    isProUser={isProUser}
+                    appTitle={appTitle}
+                    onImprove={onImprove}
                 />
             </SandpackProvider>
         </div>

@@ -129,19 +129,15 @@
   }
 }
 
-/* ─── Sandpack overrides ──────────────────────────────────────────────────── */
-/* Sandpack injects its own stylesheet — must override with global !important  */
 
-.sp-layout {
-  border: none !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-}
+@keyframes blink {
+  0%,
+  100%{
+    opacity:1;
+  }
 
-.sp-preview-container {
-  background: #0a0a0a !important;
-}
-
-.sp-preview-iframe {
-  border: none !important;
+  50%{
+    opacity:0;
+  }
+  
 }
