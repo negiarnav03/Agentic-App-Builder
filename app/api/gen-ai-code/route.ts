@@ -4,7 +4,6 @@ import { FileData, Message } from "@/types/workspace";
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
 import { GoogleGenAI } from "@google/genai";
-import { Prisma } from "@prisma/client";
 import { detectPromptInjection } from "@arcjet/next";
 import { aj } from "@/lib/arcjet";
 import arcjet from "arcjet";
